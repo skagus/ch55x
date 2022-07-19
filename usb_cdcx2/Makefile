@@ -9,8 +9,8 @@ EXTRA_FLAGS = --opt-code-speed
 C_FILES = \
 	main.c \
 	logic.c \
-	../include/debug.c
-
+	../include/debug.c \
+	../include/touchkey.c
 pre-flash:
 	
 

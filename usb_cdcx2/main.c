@@ -979,41 +979,20 @@ void main()
 
 	ES = 1;
 	PS = 1;
+
+	logic_init();
+
 	IE_UART1 = 1;
 	IP_EX |= bIP_UART1;
 
 #define BUF_SIZE	(128)
-	__xdata uint8_t aBuff[2][BUF_SIZE];
-	__xdata uint8_t anSize[2] = {0,0};
 
 	while(1)
 	{
 		if(gnUsbCfg)
 		{
 #ifdef CDC_LOOPBACK  // Cross loopback.
-			if(0 == anSize[0])
-			{
-				anSize[0] = usb_get_cdc0(aBuff[0], BUF_SIZE);
-			}
-			if(0 == anSize[1])
-			{
-				anSize[1] = usb_get_cdc1(aBuff[1], BUF_SIZE);
-			}
-
-			if(anSize[0] > 0)
-			{
-				if(0 != usb_send_cdc1(aBuff[0], anSize[0]))
-				{
-					anSize[0] = 0;
-				}
-			}
-			if(anSize[1] > 0)
-			{
-				if(0 != usb_send_cdc0(aBuff[1], anSize[1]))
-				{
-					anSize[1] = 0;
-				}
-			}
+			logic_run();
 #else
 			int len0, len1;
 
