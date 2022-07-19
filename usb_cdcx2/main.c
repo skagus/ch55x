@@ -384,34 +384,37 @@ static volatile __idata struct uart_fifo uart1 = {
 } while (0)
 #endif
 
-struct cdc_device
+typedef struct _cdc_device
 {
 	uint8_t				anLineCoding[7];	// CDC configuration information.
 	uint8_t				bUploadBusy;
 	uint8_t				nRxSize;
+	uint8_t				nNxtByte;	///< Next byte to handle, data is EP buffer.
 #ifndef CDC_LOOPBACK
 	uint8_t				usb_fifo_idx;
 	__idata struct uart_fifo	*uart;
 #endif
-};
+} CdcDevice;
 
 /* the default baud rate is 57600-8-N-1 */
-static volatile __xdata struct cdc_device gstCdc0 =
+static volatile __xdata CdcDevice gstCdc0 =
 {
 	.anLineCoding = { 0x00, 0xe1, 0x00, 0x00, 0x00, 0x00, 0x08 },
 	.bUploadBusy = 0,
 	.nRxSize = 0,
+	.nNxtByte = 0,
 #ifndef CDC_LOOPBACK
 	.usb_fifo_idx = 0,
 	.uart = &uart0,
 #endif
 };
 
-static volatile __xdata struct cdc_device gstCdc1 =
+static volatile __xdata CdcDevice gstCdc1 =
 {
 	.anLineCoding = { 0x00, 0xe1, 0x00, 0x00, 0x00, 0x00, 0x08 },
 	.bUploadBusy = 0,
 	.nRxSize = 0,
+	.nNxtByte = 0,
 #ifndef CDC_LOOPBACK
 	.usb_fifo_idx = 0,
 	.uart = &uart1,
@@ -593,7 +596,7 @@ void usb_irq_in_handler(uint8_t nEP)
  **/
 void usb_irq_out_handler(uint8_t nEP)
 {
-	__xdata struct cdc_device *pstCdc = NULL;
+	__xdata CdcDevice *pstCdc = NULL;
 
 	if (U_TOG_OK)  /* Out of sync packets will be dropped. */
 	{
@@ -754,7 +757,7 @@ int usb_vendor_setup_request_handler(PXUSB_SETUP_REQ pstReq)
 	{
 		case GET_LINE_CODING:
 		{
-			__xdata struct cdc_device *pstCurCdc = NULL;
+			__xdata CdcDevice *pstCurCdc = NULL;
 			if (pstReq->wIndexL == 0)  /* interface 0 is gstCdc0 */
 				pstCurCdc = &gstCdc0;
 			else if (pstReq->wIndexL == 2) /* interface 2 is gstCdc1 */
@@ -874,6 +877,83 @@ void uart1_isr(void) __interrupt (INT_NO_UART1)
 }
 #endif
 
+uint8_t usb_send_cdc0(uint8_t* pSrc, uint8_t nSize)
+{
+	uint8_t nSizeTx = 0;
+	if(!gstCdc0.bUploadBusy)
+	{
+		nSizeTx = (nSize > MAX_PACKET_SIZE) ? MAX_PACKET_SIZE : nSize;
+		__xdata uint8_t *pTX = gaBuf4EP2 + MAX_PACKET_SIZE;
+
+		memcpy(pTX, pSrc, nSizeTx);
+
+		UEP2_T_LEN = nSizeTx;
+		UEP2_CTRL &= ~MASK_UEP_T_RES | UEP_T_RES_ACK;
+		gstCdc0.bUploadBusy = 1;
+	}
+	return nSizeTx;
+}
+
+uint8_t usb_send_cdc1(uint8_t* pSrc, uint8_t nSize)
+{
+	uint8_t nSizeTx = 0;
+	if(!gstCdc1.bUploadBusy)
+	{
+		nSizeTx = (nSize > MAX_PACKET_SIZE) ? MAX_PACKET_SIZE : nSize;
+		__xdata uint8_t *pTX = gaBuf4EP3 + MAX_PACKET_SIZE;
+
+		memcpy(pTX, pSrc, nSizeTx);
+
+		UEP3_T_LEN = nSizeTx;
+		UEP3_CTRL &= ~MASK_UEP_T_RES | UEP_T_RES_ACK;
+		gstCdc1.bUploadBusy = 1;
+	}
+	return nSizeTx;
+}
+
+uint8_t usb_get_cdc0(uint8_t* pDst, uint8_t nMaxSize)
+{
+	uint8_t nByte = gstCdc0.nRxSize > nMaxSize ? nMaxSize : gstCdc0.nRxSize;
+	
+	if(nByte > 0)
+	{
+		memcpy(pDst, gaBuf4EP2 + gstCdc0.nNxtByte, nByte);
+		gstCdc0.nRxSize -= nByte;
+		if(0 == gstCdc0.nRxSize)
+		{
+			gstCdc0.nNxtByte = 0; // resume.
+			UEP2_CTRL &= ~MASK_UEP_R_RES | UEP_R_RES_ACK;
+		}
+		else
+		{
+			gstCdc0.nNxtByte += nByte;
+		}
+	}
+	return nByte;
+}
+
+uint8_t usb_get_cdc1(uint8_t* pDst, uint8_t nMaxSize)
+{
+	uint8_t nByte = gstCdc1.nRxSize > nMaxSize ? nMaxSize : gstCdc1.nRxSize;
+	
+	if(nByte > 0)
+	{
+		memcpy(pDst, gaBuf4EP3 + gstCdc1.nNxtByte, nByte);
+		gstCdc1.nRxSize -= nByte;
+		if(0 == gstCdc1.nRxSize)
+		{
+			gstCdc1.nNxtByte = 0; // resume.
+			UEP3_CTRL &= ~MASK_UEP_R_RES | UEP_R_RES_ACK;
+		}
+		else
+		{
+			gstCdc1.nNxtByte += nByte;
+		}
+	}
+	return nByte;	
+}
+
+
 void main()
 {
 	uint8_t t0 = 0;	// timeout check.
@@ -902,45 +982,37 @@ void main()
 	IE_UART1 = 1;
 	IP_EX |= bIP_UART1;
 
+#define BUF_SIZE	(128)
+	__xdata uint8_t aBuff[2][BUF_SIZE];
+	__xdata uint8_t anSize[2] = {0,0};
+
 	while(1)
 	{
 		if(gnUsbCfg)
 		{
 #ifdef CDC_LOOPBACK  // Cross loopback.
-			if (!gstCdc0.bUploadBusy && gstCdc1.nRxSize > 0)
+			if(0 == anSize[0])
 			{
-				__xdata uint8_t *pRX = gaBuf4EP3;
-				__xdata uint8_t *pTX = gaBuf4EP2 + MAX_PACKET_SIZE;
-
-				uint8_t nRxSize = gstCdc1.nRxSize; 
-				gstCdc1.nRxSize = 0;
-				memcpy(pTX, pRX, nRxSize);
-
-				// Resume RX in CDC 1
-				/* gstCdc1: ACK: ready, continue recving */
-				UEP3_CTRL = UEP3_CTRL & ~ MASK_UEP_R_RES | UEP_R_RES_ACK;
-
-				// Start TX in CDC 0
-				UEP2_T_LEN = nRxSize;
-				UEP2_CTRL = UEP2_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_ACK;
-				gstCdc0.bUploadBusy = 1;
+				anSize[0] = usb_get_cdc0(aBuff[0], BUF_SIZE);
+			}
+			if(0 == anSize[1])
+			{
+				anSize[1] = usb_get_cdc1(aBuff[1], BUF_SIZE);
 			}
 
-			if (!gstCdc1.bUploadBusy && gstCdc0.nRxSize > 0)
+			if(anSize[0] > 0)
 			{
-				__xdata uint8_t *pRX = gaBuf4EP2; 
-				__xdata uint8_t *pTX = gaBuf4EP3 + MAX_PACKET_SIZE;
-
-				uint8_t nRxSize = gstCdc0.nRxSize; 
-				gstCdc0.nRxSize = 0;
-				memcpy(pTX, pRX, nRxSize);
-
-				/* gstCdc1: ready, continue recving */
-				UEP2_CTRL = UEP2_CTRL & ~ MASK_UEP_R_RES | UEP_R_RES_ACK;
-
-				UEP3_T_LEN = nRxSize;
-				UEP3_CTRL = UEP3_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_ACK;
-				gstCdc1.bUploadBusy = 1;
+				if(0 != usb_send_cdc1(aBuff[0], anSize[0]))
+				{
+					anSize[0] = 0;
+				}
+			}
+			if(anSize[1] > 0)
+			{
+				if(0 != usb_send_cdc0(aBuff[1], anSize[1]))
+				{
+					anSize[1] = 0;
+				}
 			}
 #else
 			int len0, len1;
