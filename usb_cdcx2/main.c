@@ -517,7 +517,7 @@ void usb_irq_suspend_handler(void)
 /***
  * Handle data sending.
  */
-void usb_irq_in_handler(uint8_t nEP)
+void handle_in(uint8_t nEP)
 {
 	switch (nEP)
 	{
@@ -594,7 +594,7 @@ void usb_irq_in_handler(uint8_t nEP)
 /**
  * Handle data receiving.
  **/
-void usb_irq_out_handler(uint8_t nEP)
+void handle_out(uint8_t nEP)
 {
 	__xdata CdcDevice *pstCdc = NULL;
 
@@ -669,7 +669,7 @@ void usb_irq_out_handler(uint8_t nEP)
 /**
  * Get Descriptor information into gpSetupXferPoint/gnSetupXferSize
  **/
-int usb_get_descriptor_handler(uint8_t nDescType, uint8_t nStrIdx)
+int handle_request_get_desc(uint8_t nDescType, uint8_t nStrIdx)
 {
 	const uint8_t *pstDest = NULL;
 	int nSize = 0;
@@ -721,12 +721,12 @@ int usb_get_descriptor_handler(uint8_t nDescType, uint8_t nStrIdx)
 	return 0;
 }
 
-int usb_standard_setup_request_handler(PXUSB_SETUP_REQ req)
+int handle_setup_standard(PXUSB_SETUP_REQ req)
 {
 	switch (req->bRequest)
 	{
 		case USB_GET_DESCRIPTOR:
-			return usb_get_descriptor_handler(req->wValueH, req->wValueL);
+			return handle_request_get_desc(req->wValueH, req->wValueL);
 		case USB_SET_ADDRESS:
 			/* new address is addressed after device ACK */
 			gnUsbNewAddr = req->wValueL;
@@ -751,7 +751,7 @@ int usb_standard_setup_request_handler(PXUSB_SETUP_REQ req)
 	return 0;
 }
 
-int usb_vendor_setup_request_handler(PXUSB_SETUP_REQ pstReq)
+int handle_setup_vendor(PXUSB_SETUP_REQ pstReq)
 {
 	switch (pstReq->bRequest)
 	{
@@ -784,7 +784,7 @@ int usb_vendor_setup_request_handler(PXUSB_SETUP_REQ pstReq)
 /**
  * Setup handler called only for EP0
  **/
-void usb_irq_setup_handler(uint8_t nEP)
+void handle_setup(uint8_t nEP)
 {
 	if (nEP == 0)
 	{
@@ -797,9 +797,9 @@ void usb_irq_setup_handler(uint8_t nEP)
 			memcpy(&gstUsbLastSetupReq, pstReq, sizeof(gstUsbLastSetupReq));
 
 			if ((pstReq->bRequestType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_STANDARD)
-				bFailed = usb_standard_setup_request_handler(pstReq);
+				bFailed = handle_setup_standard(pstReq);
 			else
-				bFailed = usb_vendor_setup_request_handler(pstReq);
+				bFailed = handle_setup_vendor(pstReq);
 		}
 
 		if (bFailed || (gnSetupXferSize > 0 && !gpSetupXferPoint))
@@ -832,13 +832,13 @@ void DeviceInterrupt(void) __interrupt (INT_NO_USB)                       //USB 
 		switch (USB_INT_ST & MASK_UIS_TOKEN)
 		{
 			case UIS_TOKEN_IN:
-				usb_irq_in_handler(nEP);
+				handle_in(nEP);
 				break;
 			case UIS_TOKEN_OUT:
-				usb_irq_out_handler(nEP);
+				handle_out(nEP);
 				break;
 			case UIS_TOKEN_SETUP:
-				usb_irq_setup_handler(nEP);
+				handle_setup(nEP);
 				break;
 		}
 		UIF_TRANSFER = 0; /* clear interrupt */
@@ -985,7 +985,6 @@ void main()
 	IE_UART1 = 1;
 	IP_EX |= bIP_UART1;
 
-#define BUF_SIZE	(128)
 
 	while(1)
 	{

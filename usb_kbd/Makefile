@@ -1,4 +1,4 @@
-TARGET = usb_device_hid
+TARGET = usb_kdb
 
 # Adjust the XRAM location and size to leave space for the USB DMA buffers
 # Buffer layout in XRAM:
