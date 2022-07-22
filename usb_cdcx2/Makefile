@@ -7,7 +7,7 @@ XRAM_LOC = 0x0200
 EXTRA_FLAGS = --opt-code-speed
 
 C_FILES = \
-	main.c \
+	usb_cdc2x.c \
 	logic.c \
 	../include/debug.c \
 	../include/touchkey.c

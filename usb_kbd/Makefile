@@ -11,7 +11,7 @@ XRAM_SIZE = 0x0300
 XRAM_LOC = 0x0100
 
 C_FILES = \
-	main.c \
+	usb_kbd.c \
 	../include/debug.c
 
 pre-flash:

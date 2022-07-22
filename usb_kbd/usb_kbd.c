@@ -654,8 +654,8 @@ void main()
 
 
 	TMOD = 0x11;
-	TH0 = (65536 - 2000)/256;  // for seed.
-	TL0 = (65536 - 2000)%256;  // for seed.
+	TH0 = (65536 - 2000) / 256;  // for seed.
+	TL0 = (65536 - 2000) % 256;  // for seed.
 	TR0 = 1;    // Timer 0 start  - TR1 for time 1.
 	ET0 = 1;    // Enable interrupt for timer 0
 	EA  = 1;    // Activate global interrupt
