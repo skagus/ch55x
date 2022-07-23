@@ -1,5 +1,3 @@
-typedef unsigned char                 *PUINT8;
-
 #include "ch554.h"
 #include "debug.h"
 #include <stdio.h>
@@ -22,20 +20,8 @@ uint8_t gbReady;  // USB setup done! work device!.
 uint8_t SetupReq;
 uint8_t SetupLen;   // 두가지 의미로 사용되는 듯???
 uint8_t gbKbdTxDone;
-PUINT8  pDescr;
-uint8_t gbNumLock;
-uint8_t len;
-#if 0
-void jump_to_bootloader()
-{
-	USB_INT_EN = 0;
-	USB_CTRL = 0x06;
-	EA = 0;
-	mDelaymS(100);
-	bootloader();
-	while(1);
-}
-#endif
+uint8_t* gpNextTX;    // Pointer for next transfer.
+uint8_t gnReport;
 
 __code uint8_t DevDesc[0x12] = 
 {
@@ -106,36 +92,39 @@ void USBDeviceInit()
 
 void usb_SendKbd(uint8_t* pSrc, uint8_t nBytes)
 {
-    memcpy( Ep1Buffer, pSrc, nBytes);
+   	while(gbKbdTxDone == 0);
+    memcpy(Ep1Buffer, pSrc, nBytes);
     UEP1_T_LEN = nBytes;
-    UEP1_CTRL = UEP1_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_ACK;
+    UEP1_CTRL = UEP1_CTRL & ~MASK_UEP_T_RES | UEP_T_RES_ACK;
+    gbKbdTxDone = 1;
+	while(gbKbdTxDone == 0);
 }
 
 void usb_SendMouse(uint8_t* pSrc, uint8_t nBytes)
 {
-    memcpy( Ep2Buffer, pSrc, nBytes);
+    memcpy(Ep2Buffer, pSrc, nBytes);
     UEP2_T_LEN = nBytes;
-    UEP2_CTRL = UEP2_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_ACK;
+    UEP2_CTRL = UEP2_CTRL & ~MASK_UEP_T_RES | UEP_T_RES_ACK;
 }
 
 void handle_Setup()
 {
     static uint8_t nUsbConfig;  // Keep configuration value and response if requested.
     PUSB_SETUP_REQ pstSetupReq = (PUSB_SETUP_REQ)Ep0Buffer;
-    len = USB_RX_LEN;
+    uint8_t nRxLen = USB_RX_LEN;
 
-    if(len == (sizeof(USB_SETUP_REQ)))
+    if(nRxLen == (sizeof(USB_SETUP_REQ)))
     {
         SetupLen = pstSetupReq->wLengthL;
-        if(pstSetupReq->wLengthH || SetupLen > 0x7F )
+        if(pstSetupReq->wLengthH || SetupLen > 0x7F)
         {
             SetupLen = 0x7F;    // Limit total length.
         }
-        len = 0;                                                        // Default is success and upload 0 length
+        nRxLen = 0;                                                        // Default is success and upload 0 length
         SetupReq = pstSetupReq->bRequest;
         if ((pstSetupReq->bRequestType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD)// HID class command.
         {
-            switch( SetupReq )
+            switch(SetupReq)
             {
                 case 0x01://GetReport
                 case 0x02://GetIdle
@@ -145,7 +134,7 @@ void handle_Setup()
                 case 0x0B://SetProtocol
                     break;
                 default:
-                    len = 0xFF; // command not supported
+                    nRxLen = 0xFF; // command not supported
                     break;
             }
         }
@@ -158,42 +147,42 @@ void handle_Setup()
                     switch(pstSetupReq->wValueH)
                     {
                         case 1:                                             // device descriptor.
-                            pDescr = DevDesc;
-                            len = sizeof(DevDesc);
+                            gpNextTX = DevDesc;
+                            nRxLen = sizeof(DevDesc);
                             break;
                         case 2:                                             // configuration descriptor
-                            pDescr = CfgDesc;
-                            len = sizeof(CfgDesc);
+                            gpNextTX = CfgDesc;
+                            nRxLen = sizeof(CfgDesc);
                             break;
                         case 0x22:                                          // report descriptor
                             if(pstSetupReq->wIndexL == 0)                   // interface 0
                             {
-                                pDescr = KeyRepDesc;
-                                len = sizeof(KeyRepDesc);
+                                gpNextTX = KeyRepDesc;
+                                nRxLen = sizeof(KeyRepDesc);
                             }
                             else if(pstSetupReq->wIndexL == 1)              //  interface 1
                             {
-                                pDescr = MouseRepDesc;
-                                len = sizeof(MouseRepDesc);
-                                gbReady = 1;                                  // If there are more interfaces, this standard bit should be valid after the last interface is configured
+                                gpNextTX = MouseRepDesc;
+                                nRxLen = sizeof(MouseRepDesc);
+                                gbReady = 1;   // If there are more interfaces, this standard bit should be valid after the last interface is configured
                             }
                             else
                             {
-                                len = 0xff;                                 // wrong case.
+                                nRxLen = 0xff;                                 // wrong case.
                             }
                             break;
                         default:
-                            len = 0xff;                                     // unsupported cmd.
+                            nRxLen = 0xff;                                     // unsupported cmd.
                             break;
                     }
-                    if ( SetupLen > len )
+                    if (SetupLen > nRxLen)
                     {
-                        SetupLen = len;    // Limit total length
+                        SetupLen = nRxLen;    // Limit total length
                     }
-                    len = SetupLen >= 8 ? 8 : SetupLen;                  // length of this transmission.
-                    memcpy(Ep0Buffer,pDescr,len);
-                    SetupLen -= len;
-                    pDescr += len;
+                    nRxLen = (SetupLen >= DEFAULT_ENDP0_SIZE) ? DEFAULT_ENDP0_SIZE : SetupLen;                  // length of this transmission.
+                    memcpy(Ep0Buffer, gpNextTX, nRxLen);
+                    SetupLen -= nRxLen;
+                    gpNextTX += nRxLen;
                     break;
                 }
                 case USB_SET_ADDRESS:
@@ -203,66 +192,66 @@ void handle_Setup()
                     Ep0Buffer[0] = nUsbConfig;
                     if (SetupLen >= 1)
                     {
-                        len = 1;
+                        nRxLen = 1;
                     }
                     break;
                 case USB_SET_CONFIGURATION:
                     nUsbConfig = pstSetupReq->wValueL;
                     break;
-                case 0x0A:
+                case USB_GET_INTERFACE:
                     break;
                 case USB_CLEAR_FEATURE:                                            //Clear Feature
-                    if ( ( pstSetupReq->bRequestType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_ENDP )// end point.
+                    if ((pstSetupReq->bRequestType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP)// end point.
                     {
-                        switch( pstSetupReq->wIndexL )
+                        switch(pstSetupReq->wIndexL)
                         {
                             case 0x82:
-                                UEP2_CTRL = UEP2_CTRL & ~ ( bUEP_T_TOG | MASK_UEP_T_RES ) | UEP_T_RES_NAK;
+                                UEP2_CTRL = UEP2_CTRL & ~(bUEP_T_TOG | MASK_UEP_T_RES) | UEP_T_RES_NAK;
                                 break;
                             case 0x81:
-                                UEP1_CTRL = UEP1_CTRL & ~ ( bUEP_T_TOG | MASK_UEP_T_RES ) | UEP_T_RES_NAK;
+                                UEP1_CTRL = UEP1_CTRL & ~(bUEP_T_TOG | MASK_UEP_T_RES) | UEP_T_RES_NAK;
                                 break;
                             case 0x01:
-                                UEP1_CTRL = UEP1_CTRL & ~ ( bUEP_R_TOG | MASK_UEP_R_RES ) | UEP_R_RES_ACK;
+                                UEP1_CTRL = UEP1_CTRL & ~(bUEP_R_TOG | MASK_UEP_R_RES) | UEP_R_RES_ACK;
                                 break;
                             default:
-                                len = 0xFF;
+                                nRxLen = 0xFF;
                                 break;
                             }
                     }
-                    if ( ( pstSetupReq->bRequestType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_DEVICE ) // equipment.
+                    if ((pstSetupReq->bRequestType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) // equipment.
                     {
                         break;
                     }
                     else
                     {
-                        len = 0xFF;                                                // not supported.
+                        nRxLen = 0xFF;                                                // not supported.
                     }
                     break;
                 case USB_SET_FEATURE:
-                    if( ( pstSetupReq->bRequestType & 0x1F ) == 0x00 ) // Set up the device
+                    if((pstSetupReq->bRequestType & 0x1F) == 0x00) // Set up the device
                     {
-                        if( ( ( ( uint16_t )pstSetupReq->wValueH << 8 ) | pstSetupReq->wValueL ) == 0x01 )
+                        if((((uint16_t)pstSetupReq->wValueH << 8) | pstSetupReq->wValueL) == 0x01)
                         {
-                            if( CfgDesc[ 7 ] & 0x20 )
+                            if(CfgDesc[7] & 0x20)
                             {
                                 /* Set wakeup enable flag */
                             }
                             else
                             {
-                                len = 0xFF;                                        // failed
+                                nRxLen = 0xFF;                                        // failed
                             }
                         }
                         else
                         {
-                            len = 0xFF;                                        // failed
+                            nRxLen = 0xFF;                                        // failed
                         }
                     }
                     else if ((pstSetupReq->bRequestType & 0x1F) == 0x02)        // set endpoint
                     {
                         if ((((uint16_t)pstSetupReq->wValueH << 8) | pstSetupReq->wValueL) == 0x00)
                         {
-                            switch( ( ( uint16_t )pstSetupReq->wIndexH << 8 ) | pstSetupReq->wIndexL )
+                            switch(((uint16_t)pstSetupReq->wIndexH << 8) | pstSetupReq->wIndexL)
                             {
                                 case 0x82:
                                     UEP2_CTRL = UEP2_CTRL & (~bUEP_T_TOG) | UEP_T_RES_STALL;// set endpoint 2 IN STALL
@@ -274,85 +263,85 @@ void handle_Setup()
                                     UEP1_CTRL = UEP1_CTRL & (~bUEP_T_TOG) | UEP_T_RES_STALL;// set endpoint 1 IN STALL
                                     break;
                                 default:
-                                    len = 0xFF;                               //failure
+                                    nRxLen = 0xFF;                               //failure
                                     break;
                             }
                         }
                         else
                         {
-                            len = 0xFF;                                   //failure
+                            nRxLen = 0xFF;                                   //failure
                         }
                     }
                     else
                     {
-                        len = 0xFF;                                      //failure
+                        nRxLen = 0xFF;                                      //failure
                     }
                     break;
                 case USB_GET_STATUS:
                     Ep0Buffer[0] = 0x00;
                     Ep0Buffer[1] = 0x00;
-                    if ( SetupLen >= 2 )
+                    if (SetupLen >= 2)
                     {
-                        len = 2;
+                        nRxLen = 2;
                     }
                     else
                     {
-                        len = SetupLen;
+                        nRxLen = SetupLen;
                     }
                     break;
                 default:
-                    len = 0xff;                                           //failure
+                    nRxLen = 0xff;                                           //failure
                     break;
             }
         }
     }
     else
     {
-        len = 0xff;                                                   // wrong packet length.
+        nRxLen = 0xff;                                                   // wrong packet length.
     }
 
-    if(len == 0xff)
+    if(nRxLen == 0xff)
     {
         SetupReq = 0xFF;
         UEP0_CTRL = bUEP_R_TOG | bUEP_T_TOG | UEP_R_RES_STALL | UEP_T_RES_STALL;//STALL
     }
-    else // if(len >= 0)
+    else // if(nRxLen >= 0)
     {
-        // if len == 0, although it has not yet reached the state stage, 
+        // if nRxLen == 0, although it has not yet reached the state stage, 
         // upload 0-length data packets in advance to prevent the host from entering the state stage in advance
 
-        UEP0_T_LEN = len;
+        UEP0_T_LEN = nRxLen;
         //The default data packet is DATA1, and the response ACK is returned
         UEP0_CTRL = bUEP_R_TOG | bUEP_T_TOG | UEP_R_RES_ACK | UEP_T_RES_ACK;
     }
 }
 
+// Handle Upload event.
 void handle_in(uint8_t nEP)
 {
     switch(nEP)
     {
-        case 2:                                                  //endpoint 2# upload
-            UEP2_T_LEN = 0;                                                     //The pre-used send length must be cleared
-//            UEP1_CTRL ^= bUEP_T_TOG;                                          //If you do not set automatic flip, you need to flip manually
-            UEP2_CTRL = UEP2_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_NAK;           //Default answer NAK
+        case 2:
+            UEP2_T_LEN = 0;   //The pre-used send length must be cleared
+            UEP2_CTRL = UEP2_CTRL & ~MASK_UEP_T_RES | UEP_T_RES_NAK; //Default answer NAK
             break;
-        case 1:                                                  //endpoint 1# upload.
-            UEP1_T_LEN = 0;                                                     //The pre-used send length must be cleared
-//            UEP2_CTRL ^= bUEP_T_TOG;                                          //If you do not set automatic flip, you need to flip manually
-            UEP1_CTRL = UEP1_CTRL & ~ MASK_UEP_T_RES | UEP_T_RES_NAK;           //Default answer NAK
-            gbKbdTxDone = 1;                                                     //transfer complete flag
+        case 1:
+            UEP1_T_LEN = 0;   //The pre-used send length must be cleared
+            UEP1_CTRL = UEP1_CTRL & ~MASK_UEP_T_RES | UEP_T_RES_NAK; //Default answer NAK
+            gbKbdTxDone = 1;  //transfer complete flag
             break;
-        case 0:                                               //endpoint0 IN
+        case 0:
         {
+            uint8_t nLen;
             switch(SetupReq)
             {
                 case USB_GET_DESCRIPTOR:
-                    len = SetupLen >= 8 ? 8 : SetupLen;
-                    memcpy( Ep0Buffer, pDescr, len );
-                    SetupLen -= len;
-                    pDescr += len;
-                    UEP0_T_LEN = len;
-                    UEP0_CTRL ^= bUEP_T_TOG;                                     //Sync flag flip.
+                    nLen = (SetupLen >= DEFAULT_ENDP0_SIZE) ? DEFAULT_ENDP0_SIZE : SetupLen;
+                    memcpy(Ep0Buffer, gpNextTX, nLen);
+                    SetupLen -= nLen;
+                    gpNextTX += nLen;
+                    UEP0_T_LEN = nLen;
+                    UEP0_CTRL ^= bUEP_T_TOG;   //Sync flag flip.
                     break;
                 case USB_SET_ADDRESS:
                     USB_DEV_AD = USB_DEV_AD & bUDA_GP_BIT | SetupLen;
@@ -372,17 +361,17 @@ void handle_out(uint8_t nEP)
 {
     if(0 == nEP)
     {
-        len = USB_RX_LEN;
         if(SetupReq == 0x09)
         {
-            if (0 != Ep0Buffer[0])
-            {
-                gbNumLock = 1;
-            }
-            else
-            {
-                gbNumLock = 0;
-            }
+            /**
+             * BIT(0) : NUM LOCK
+             * BIT(1) : CAPS LOCK
+             * BIT(2) : SCROLL LOCK
+             * BIT(3) : COMPOSE
+             * BIT(4) : KANA
+             * BIT(5-7) : CONSTANT
+             * */
+            gnReport = Ep0Buffer[0];
         }
         UEP0_CTRL ^= bUEP_R_TOG;                                     //Sync flag flip
     }
@@ -390,23 +379,22 @@ void handle_out(uint8_t nEP)
 
 void ISR_USB() __interrupt (INT_NO_USB)
 {
-    uint8_t len = 0;
     if (UIF_TRANSFER)                                                            //USB transfer complete flag
     {
         uint8_t nEP = USB_INT_ST & MASK_UIS_ENDP;
         switch (USB_INT_ST & (MASK_UIS_TOKEN))
         {
-        case UIS_TOKEN_SETUP:
-            handle_Setup();
-            break;
-        case UIS_TOKEN_IN:                                                  //endpoint 2# upload
-            handle_in(nEP);
-            break;
-        case UIS_TOKEN_OUT:  // endpoint0 OUT
-            handle_out(nEP);
-            break;
-        default:
-            break;
+            case UIS_TOKEN_SETUP:
+                handle_Setup();
+                break;
+            case UIS_TOKEN_IN:                                                  //endpoint 2# upload
+                handle_in(nEP);
+                break;
+            case UIS_TOKEN_OUT:  // endpoint0 OUT
+                handle_out(nEP);
+                break;
+            default:
+                break;
         }
         UIF_TRANSFER = 0;  // Write 0 to clear the interrupt
     }
@@ -425,7 +413,7 @@ void ISR_USB() __interrupt (INT_NO_USB)
     if (UIF_SUSPEND)                                                     // USB bus suspend/wake up complete
     {
         UIF_SUSPEND = 0;
-        if ( USB_MIS_ST & bUMS_SUSPEND )
+        if (USB_MIS_ST & bUMS_SUSPEND)
         {
         }
     }
@@ -454,22 +442,6 @@ void ISR_USB() __interrupt (INT_NO_USB)
 #define		TOUCH_NUM		(0x04)
 #define		SAMPLE_TIMES	(0x05)
 
-#define		L_WIN 					0x08
-#define 	L_ALT 					0x04
-#define		L_SHIFT					0x02
-#define 	L_CTL					0x01
-#define 	R_WIN 					0x80
-#define 	R_ALT 					0x40
-#define 	R_SHIFT					0x20
-#define 	R_CTL					0x10
-#define 	SPACE					0x2C
-#define		ENTER					0x28
-
-#define LED_PIN1 0
-#define LED_PIN2 1
-SBIT(LED1, 0xB0, LED_PIN1);
-SBIT(LED2, 0xB0, LED_PIN2);
-
 uint32_t gnMillis;
 
 void ISR_Timer0() __interrupt (INT_NO_TMR0)
@@ -485,9 +457,10 @@ __xdata uint8_t 	TK_Code[TOUCH_NUM] = {0x03, 0x04,};
 __xdata uint16_t 		Key_FreeBuf[TOUCH_NUM];
 __xdata uint8_t			Touch_IN;
 
-uint8_t TK_SelectChannel( uint8_t ch )
+
+uint8_t TK_SelectChannel(uint8_t ch)
 {
-	if ( ch <= TOUCH_NUM )
+	if (ch <= TOUCH_NUM)
 	{
 		TKEY_CTRL = (TKEY_CTRL & 0xF8) | TK_Code[ch];
 		return 1;
@@ -496,7 +469,26 @@ uint8_t TK_SelectChannel( uint8_t ch )
 	return	0;
 }
 
-uint8_t TK_Init( uint8_t channel)
+void ISR_Touch() __interrupt (INT_NO_TKEY)
+{
+    __xdata	static uint8_t nCh = 0;
+    __xdata	uint16_t KeyData;
+	KeyData = TKEY_DAT;
+
+	if(KeyData < (Key_FreeBuf[nCh] - TH_VALUE))
+	{
+		Touch_IN |=  1 << (TK_Code[nCh] - 1);
+	}
+	if(++nCh >= TOUCH_NUM)
+	{
+		nCh = 0;
+	}
+	TK_SelectChannel(nCh);
+}
+
+
+
+uint8_t TK_Init(uint8_t channel)
 {
     __xdata	uint8_t 	i,j;
     __xdata	uint16_t 	sum;
@@ -506,17 +498,17 @@ uint8_t TK_Init( uint8_t channel)
 	P1_MOD_OC &= ~channel;
 	TKEY_CTRL |= bTKC_2MS ;
 
-	for ( i = 0; i < TOUCH_NUM; i++ )
+	for (i = 0; i < TOUCH_NUM; i++)
 	{
 		sum = 0;
 		j = SAMPLE_TIMES;
-		TK_SelectChannel( i );
-		while( j-- )
+		TK_SelectChannel(i);
+		while(j--)
 		{
 			OverTime = 0;
 			while((TKEY_CTRL & bTKC_IF) == 0) // Timing interrupt flag.
 			{
-				if( ++OverTime == 0 )
+				if(++OverTime == 0)
 				{
 					return 0;
 				}
@@ -529,171 +521,15 @@ uint8_t TK_Init( uint8_t channel)
 	return 1;
 }
 
-void ISR_Touch() __interrupt (INT_NO_TKEY)
-{
-    __xdata	static uint8_t nCh = 0;
-    __xdata	uint16_t KeyData;
-	KeyData = TKEY_DAT;
-
-	if( KeyData < ( Key_FreeBuf[nCh] - TH_VALUE ) )
-	{
-		Touch_IN |=  1 << ( TK_Code[nCh] - 1 );
-	}
-	if( ++nCh >= TOUCH_NUM )
-	{
-		nCh = 0;
-	}
-	TK_SelectChannel( nCh );
-}
-
-
-
-
-static void SendKey (char c)
-{
-    static uint8_t HIDKey[8] = {0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0};
-	if( ('a' <= c) && (c <= 'z' ))
-    {
-		c = c - 'a' + 'A';  // Upper case.
-	}
-    else
-    {
-        HIDKey[0] = L_SHIFT;
-    }
-
-	if( ('A' <= c) && (c <= 'Z' ))
-    {
-		HIDKey[2] = c - 'A' + 4;
-	}
-	else if('1' <= c && c <= '9' )
-    {
-        HIDKey[0] = 0x00;
-        HIDKey[2] = c - '1' + 0x1E;
-    }
-    else
-    {
-		switch ( c )
-        {
-			case '`' :
-				HIDKey[0] = 0x08;
-				HIDKey[2] = 0x15;
-				break;
-			case '\\':
-				HIDKey[2] = 0x31;
-				break;
-			case ' ':
-				HIDKey[2] = SPACE;
-				break;
-			case '\n':
-			case '\r':
-				HIDKey[2] = ENTER;
-				break;
-			case ':':
-				HIDKey[0] = 0x02;
-				HIDKey[2] = 0x33;
-				break;
-			case '+':
-				HIDKey[0] = 0x000;
-				HIDKey[2] = 0x57;
-				break;
-			case '?':
-				HIDKey[0] = L_SHIFT;
-				HIDKey[2] = 0x38;
-				break;
-			case '_':
-				HIDKey[0] = 0x02;
-				HIDKey[2] = 0x2D;
-				break;
-			case '/':
-				HIDKey[0] = L_CTL + L_ALT;
-				HIDKey[2] = 0x16;
-				break;
-			case '0':
-				HIDKey[2] = 0x27;
-				break;
-			case '.':
-				HIDKey[2] = 0x37;
-				break;
-			case '~':
-				HIDKey[0] = L_ALT;
-				HIDKey[2] = 0x05;
-				break;
-			case '!':
-				HIDKey[0] = L_ALT;
-				HIDKey[2] = 0x08;
-				break;
-			default:
-				break;
-		}
-	}
-	mDelaymS( 10 );
-	while(gbKbdTxDone == 0);
-	usb_SendKbd(HIDKey, sizeof(HIDKey));
-	while(gbKbdTxDone == 0);
-
-	mDelaymS( 10 );
-	HIDKey[0] = 0x00;
-	HIDKey[2] = 0x00;
-	while(gbKbdTxDone == 0);
-	usb_SendKbd(HIDKey, sizeof(HIDKey));
-	while(gbKbdTxDone == 0);
-}
-
-void SendString(char* pStr)
-{
-    while(*pStr)
-    {
-        SendKey(*pStr);
-        pStr++;
-    }
-}
-
-
-uint32_t nLastMillis = 0;
-
-void kbd_run()
-{
-    __xdata char aBuff[32];
-
-    if (gnMillis - nLastMillis > 40)
-    {
-        nLastMillis = gnMillis;
-//        LED1 = gbNumLock;
-        LED1 = !LED1;
-
-        if (Touch_IN != 0)
-        {
-            LED1 = !LED1;
-            // SendKey('a' + (Touch_IN & 0x0F));
-            sprintf(aBuff, "IN:%X\n", Touch_IN);
-            SendString(aBuff);
-            Touch_IN = 0;
-        }
-    }
-}
-
-
-
-void kbd_init()
-{
-	TK_Init(0x30);
-	TK_SelectChannel(0);
-
-    P3_MOD_OC = P3_MOD_OC |(1<<LED_PIN1);
-    P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN1);
-    P3_MOD_OC = P3_MOD_OC |(1<<LED_PIN2);
-    P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN2);
-}
-
-
-
 void main()
 {
-    CfgFsys( );
+    CfgFsys();
     mDelaymS(5);
-    mInitSTDIO( );
+    mInitSTDIO();
     USBDeviceInit();
 
+	TK_Init(0x30);
+	TK_SelectChannel(0);
     kbd_init();
 
 	TMOD = 0x11;
