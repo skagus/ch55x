@@ -12,6 +12,7 @@ XRAM_LOC = 0x0100
 
 C_FILES = \
 	usb_kbd.c \
+	kbd_run.c \
 	../include/debug.c
 
 pre-flash:

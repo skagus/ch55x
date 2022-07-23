@@ -1,5 +1,4 @@
 typedef unsigned char                 *PUINT8;
-typedef unsigned char volatile          UINT8V;
 
 #include "ch554.h"
 #include "debug.h"
@@ -7,16 +6,13 @@ typedef unsigned char volatile          UINT8V;
 #include <string.h>
 #include <ch554_usb.h>
 //#include <bootloader.h>
+#include "kbd.h"
+
 
 
 //__xdata char sPath[] = "This is the CH552 sample text. Press Num to toggle the LED.";
 //__xdata char *pStr = sPath;
-uint32_t gnMillis;
 
-#define LED_PIN1 0
-SBIT(LED1, 0xB0, LED_PIN1);
-#define LED_PIN2 1
-SBIT(LED2, 0xB0, LED_PIN2);
 
 __xdata __at (0x0000) uint8_t  Ep0Buffer[DEFAULT_ENDP0_SIZE];
 __xdata __at (0x0050) uint8_t  Ep1Buffer[DEFAULT_ENDP1_SIZE];
@@ -40,100 +36,6 @@ void jump_to_bootloader()
 	while(1);
 }
 #endif
-
-void ISR_Timer0() __interrupt (INT_NO_TMR0)
-{
-	TH0 = (65536 - 2000) / 256;  // Reload
-	TL0 = (65536 - 2000) % 256;  // Reload
-	gnMillis++;
-}
-
-/* Macro define */
-#define		CH2				(0x04)
-#define		CH3				(0x08)
-#define		CH_FREE			(0x07)
-
-#define		TH_VALUE		(100)
-#define		TOUCH_NUM		(0x04)
-#define		SAMPLE_TIMES	(0x05)
-
-__xdata uint8_t 	TK_Code[TOUCH_NUM] = {0x03, 0x04,};
-
-__xdata uint16_t 		Key_FreeBuf[TOUCH_NUM];
-__xdata UINT8V			Touch_IN;
-
-uint8_t TK_SelectChannel( uint8_t ch )
-{
-	if ( ch <= TOUCH_NUM )
-	{
-		TKEY_CTRL = (TKEY_CTRL & 0xF8) | TK_Code[ch];
-		return 1;
-	}
-
-	return	0;
-}
-
-uint8_t TK_Init( uint8_t channel)
-{
-    __xdata	uint8_t 	i,j;
-    __xdata	uint16_t 	sum;
-    __xdata	uint16_t 	OverTime;
-
-	P1_DIR_PU &= ~channel;
-	P1_MOD_OC &= ~channel;
-	TKEY_CTRL |= bTKC_2MS ;
-
-	for ( i = 0; i < TOUCH_NUM; i++ )
-	{
-		sum = 0;
-		j = SAMPLE_TIMES;
-		TK_SelectChannel( i );
-		while( j-- )
-		{
-			OverTime = 0;
-			while((TKEY_CTRL & bTKC_IF) == 0) // Timing interrupt flag.
-			{
-				if( ++OverTime == 0 )
-				{
-					return 0;
-				}
-			}
-			sum += TKEY_DAT;
-		}
-		Key_FreeBuf[i] = sum / SAMPLE_TIMES;
-	}
-	IE_TKEY = 1;
-	return 1;
-}
-
-void ISR_Touch() __interrupt (INT_NO_TKEY)
-{
-    __xdata	static uint8_t nCh = 0;
-    __xdata	uint16_t KeyData;
-	KeyData = TKEY_DAT;
-
-	if( KeyData < ( Key_FreeBuf[nCh] - TH_VALUE ) )
-	{
-		Touch_IN |=  1 << ( TK_Code[nCh] - 1 );
-	}
-	if( ++nCh >= TOUCH_NUM )
-	{
-		nCh = 0;
-	}
-	TK_SelectChannel( nCh );
-}
-
-
-#define		L_WIN 					0x08
-#define 	L_ALT 					0x04
-#define		L_SHIFT					0x02
-#define 	L_CTL					0x01
-#define 	R_WIN 					0x80
-#define 	R_ALT 					0x40
-#define 	R_SHIFT					0x20
-#define 	R_CTL					0x10
-#define 	SPACE					0x2C
-#define		ENTER					0x28
 
 __code uint8_t DevDesc[0x12] = 
 {
@@ -534,10 +436,122 @@ void ISR_USB() __interrupt (INT_NO_USB)
 }
 
 
-static uint8_t HIDKey[8] = {0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0};
+/*********************************
+ * 
+ *  Keyboard Handle.
+ * 
+ * *********************************/
+
+
+
+
+/* Macro define */
+#define		CH2				(0x04)
+#define		CH3				(0x08)
+#define		CH_FREE			(0x07)
+
+#define		TH_VALUE		(100)
+#define		TOUCH_NUM		(0x04)
+#define		SAMPLE_TIMES	(0x05)
+
+#define		L_WIN 					0x08
+#define 	L_ALT 					0x04
+#define		L_SHIFT					0x02
+#define 	L_CTL					0x01
+#define 	R_WIN 					0x80
+#define 	R_ALT 					0x40
+#define 	R_SHIFT					0x20
+#define 	R_CTL					0x10
+#define 	SPACE					0x2C
+#define		ENTER					0x28
+
+#define LED_PIN1 0
+#define LED_PIN2 1
+SBIT(LED1, 0xB0, LED_PIN1);
+SBIT(LED2, 0xB0, LED_PIN2);
+
+uint32_t gnMillis;
+
+void ISR_Timer0() __interrupt (INT_NO_TMR0)
+{
+	TH0 = (65536 - 2000) / 256;  // Reload
+	TL0 = (65536 - 2000) % 256;  // Reload
+	gnMillis++;
+}
+
+
+__xdata uint8_t 	TK_Code[TOUCH_NUM] = {0x03, 0x04,};
+
+__xdata uint16_t 		Key_FreeBuf[TOUCH_NUM];
+__xdata uint8_t			Touch_IN;
+
+uint8_t TK_SelectChannel( uint8_t ch )
+{
+	if ( ch <= TOUCH_NUM )
+	{
+		TKEY_CTRL = (TKEY_CTRL & 0xF8) | TK_Code[ch];
+		return 1;
+	}
+
+	return	0;
+}
+
+uint8_t TK_Init( uint8_t channel)
+{
+    __xdata	uint8_t 	i,j;
+    __xdata	uint16_t 	sum;
+    __xdata	uint16_t 	OverTime;
+
+	P1_DIR_PU &= ~channel;
+	P1_MOD_OC &= ~channel;
+	TKEY_CTRL |= bTKC_2MS ;
+
+	for ( i = 0; i < TOUCH_NUM; i++ )
+	{
+		sum = 0;
+		j = SAMPLE_TIMES;
+		TK_SelectChannel( i );
+		while( j-- )
+		{
+			OverTime = 0;
+			while((TKEY_CTRL & bTKC_IF) == 0) // Timing interrupt flag.
+			{
+				if( ++OverTime == 0 )
+				{
+					return 0;
+				}
+			}
+			sum += TKEY_DAT;
+		}
+		Key_FreeBuf[i] = sum / SAMPLE_TIMES;
+	}
+	IE_TKEY = 1;
+	return 1;
+}
+
+void ISR_Touch() __interrupt (INT_NO_TKEY)
+{
+    __xdata	static uint8_t nCh = 0;
+    __xdata	uint16_t KeyData;
+	KeyData = TKEY_DAT;
+
+	if( KeyData < ( Key_FreeBuf[nCh] - TH_VALUE ) )
+	{
+		Touch_IN |=  1 << ( TK_Code[nCh] - 1 );
+	}
+	if( ++nCh >= TOUCH_NUM )
+	{
+		nCh = 0;
+	}
+	TK_SelectChannel( nCh );
+}
+
+
+
 
 static void SendKey (char c)
 {
+    static uint8_t HIDKey[8] = {0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0};
 	if( ('a' <= c) && (c <= 'z' ))
     {
 		c = c - 'a' + 'A';  // Upper case.
@@ -634,16 +648,34 @@ void SendString(char* pStr)
     }
 }
 
-void main()
+
+uint32_t nLastMillis = 0;
+
+void kbd_run()
 {
-    uint8_t nB = 0;
-    uint32_t nLastMillis = 0;
     __xdata char aBuff[32];
-    uint8_t nKeyBackup = 0;
-    CfgFsys( );
-    mDelaymS(5);
-    mInitSTDIO( );
-    USBDeviceInit();
+
+    if (gnMillis - nLastMillis > 40)
+    {
+        nLastMillis = gnMillis;
+//        LED1 = gbNumLock;
+        LED1 = !LED1;
+
+        if (Touch_IN != 0)
+        {
+            LED1 = !LED1;
+            // SendKey('a' + (Touch_IN & 0x0F));
+            sprintf(aBuff, "IN:%X\n", Touch_IN);
+            SendString(aBuff);
+            Touch_IN = 0;
+        }
+    }
+}
+
+
+
+void kbd_init()
+{
 	TK_Init(0x30);
 	TK_SelectChannel(0);
 
@@ -651,7 +683,18 @@ void main()
     P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN1);
     P3_MOD_OC = P3_MOD_OC |(1<<LED_PIN2);
     P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN2);
+}
 
+
+
+void main()
+{
+    CfgFsys( );
+    mDelaymS(5);
+    mInitSTDIO( );
+    USBDeviceInit();
+
+    kbd_init();
 
 	TMOD = 0x11;
 	TH0 = (65536 - 2000) / 256;  // for seed.
@@ -668,19 +711,7 @@ void main()
     {
         if(gbReady)
         {
-            if (gnMillis - nLastMillis > 40)
-            {
-                nLastMillis = gnMillis;
-                LED1 = gbNumLock;
-                if (Touch_IN != 0)
-                {
-                    LED1 = !LED1;
-                    // SendKey('a' + (Touch_IN & 0x0F));
-                    sprintf(aBuff, "IN:%X\n", Touch_IN);
-                    SendString(aBuff);
-                    Touch_IN = 0;
-                }
-            }
+            kbd_run();
         }
     }
 }
