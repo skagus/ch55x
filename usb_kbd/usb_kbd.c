@@ -452,6 +452,8 @@ void ISR_Timer0() __interrupt (INT_NO_TMR0)
 }
 
 
+#if EN_TOUCH
+
 __xdata uint8_t 	TK_Code[TOUCH_NUM] = {0x03, 0x04,};
 
 __xdata uint16_t 		Key_FreeBuf[TOUCH_NUM];
@@ -520,6 +522,7 @@ uint8_t TK_Init(uint8_t channel)
 	IE_TKEY = 1;
 	return 1;
 }
+#endif
 
 void main()
 {
@@ -528,8 +531,10 @@ void main()
     mInitSTDIO();
     USBDeviceInit();
 
+#if EN_TOUCH
 	TK_Init(0x30);
 	TK_SelectChannel(0);
+#endif
     kbd_init();
 
 	TMOD = 0x11;

@@ -22,10 +22,13 @@
 #define		ENTER					0x28
 
 
-#define LED_PIN1 0
-#define LED_PIN2 1
+#define LED_PIN1	(0)
+#define LED_PIN2	(1)
+#define KEY_PIN		(5)
+
 SBIT(LED1, 0xB0, LED_PIN1);
 SBIT(LED2, 0xB0, LED_PIN2);
+SBIT(KEY, 0xB0, KEY_PIN);
 
 extern uint32_t gnMillis;
 extern __xdata uint8_t			Touch_IN;
@@ -125,26 +128,41 @@ void SendString(char* pStr)
     }
 }
 
-extern uint8_t gnReport;
+extern uint8_t gnReport;	// Key LED signal.
 
 uint32_t nLastMillis = 0;
-uint8_t gnReportBak;
+uint8_t nReportBak;
+uint8_t nKeyIn = 0;
 void kbd_run()
 {
     __xdata char aBuff[32];
-
     if (gnMillis - nLastMillis > 40)
     {
         nLastMillis = gnMillis;
 
-        if(gnReportBak != gnReport)
+        if(nReportBak != gnReport)
         {
             LED1 = !LED1;
-            gnReportBak = gnReport;
-            sprintf(aBuff, "RE:%X\n", gnReport);
-            SendString(aBuff);
-        }        
-
+            nReportBak = gnReport;
+//            sprintf(aBuff, "RE:%X\n", gnReport);
+//            SendString(aBuff);
+        }
+		if(nKeyIn != KEY)
+		{
+			memset(aBuff, 0x0, sizeof(aBuff));
+			if(KEY != 0) // Released.
+			{
+				aBuff[2] = 0;
+				usb_SendKbd(aBuff, 8);
+			}
+			else // Pushed.
+			{
+				aBuff[2] = ENTER;
+				usb_SendKbd(aBuff, 8);
+			}
+			nKeyIn = KEY;
+		}
+#if EN_TOUCH
         if (Touch_IN != 0)
         {
             LED1 = !LED1;
@@ -152,6 +170,7 @@ void kbd_run()
             SendString(aBuff);
             Touch_IN = 0;
         }
+#endif
     }
 }
 
@@ -159,8 +178,8 @@ void kbd_run()
 
 void kbd_init()
 {
-    P3_MOD_OC = P3_MOD_OC |(1<<LED_PIN1);
+    P3_MOD_OC = P3_MOD_OC | (1<<LED_PIN1);
     P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN1);
-    P3_MOD_OC = P3_MOD_OC |(1<<LED_PIN2);
+    P3_MOD_OC = P3_MOD_OC | (1<<LED_PIN2);
     P3_DIR_PU = P3_DIR_PU |	(1<<LED_PIN2);
 }
