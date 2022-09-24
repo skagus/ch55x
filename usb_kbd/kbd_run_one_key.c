@@ -8,19 +8,7 @@
 #include <string.h>
 #include <ch554_usb.h>
 #include "kbd.h"
-
-
-#define		L_WIN 					0x08
-#define 	L_ALT 					0x04
-#define		L_SHIFT					0x02
-#define 	L_CTL					0x01
-#define 	R_WIN 					0x80
-#define 	R_ALT 					0x40
-#define 	R_SHIFT					0x20
-#define 	R_CTL					0x10
-#define 	SPACE					0x2C
-#define		ENTER					0x28
-
+#include "hid_key.h"
 
 #define LED_PIN1	(0)
 #define LED_PIN2	(1)
@@ -38,85 +26,99 @@ static void SendChar (char c)
     static uint8_t HIDKey[8] = {0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0};
 	if( ('a' <= c) && (c <= 'z' ))
     {
-		c = c - 'a' + 'A';  // Upper case.
+		HIDKey[2] = c - 'a' + KEY_A;
 	}
-    else
+	else if( ('A' <= c) && (c <= 'Z' ))
     {
-        HIDKey[0] = L_SHIFT;
-    }
-
-	if( ('A' <= c) && (c <= 'Z' ))
-    {
-		HIDKey[2] = c - 'A' + 4;
+        HIDKey[0] = KEY_MOD_LSHIFT;
+		HIDKey[2] = c - 'A' + KEY_A;
 	}
 	else if('1' <= c && c <= '9' )
     {
-        HIDKey[0] = 0x00;
-        HIDKey[2] = c - '1' + 0x1E;
+        HIDKey[2] = c - '1' + KEY_1;
     }
-    else
+    else if(' ' <= c && c <= '0')
     {
-		switch ( c )
-        {
-			case '`' :
-				HIDKey[0] = 0x08;
-				HIDKey[2] = 0x15;
-				break;
-			case '\\':
-				HIDKey[2] = 0x31;
-				break;
-			case ' ':
-				HIDKey[2] = SPACE;
-				break;
-			case '\n':
-			case '\r':
-				HIDKey[2] = ENTER;
-				break;
-			case ':':
-				HIDKey[0] = 0x02;
-				HIDKey[2] = 0x33;
-				break;
-			case '+':
-				HIDKey[0] = 0x000;
-				HIDKey[2] = 0x57;
-				break;
-			case '?':
-				HIDKey[0] = L_SHIFT;
-				HIDKey[2] = 0x38;
-				break;
-			case '_':
-				HIDKey[0] = 0x02;
-				HIDKey[2] = 0x2D;
-				break;
-			case '/':
-				HIDKey[0] = L_CTL + L_ALT;
-				HIDKey[2] = 0x16;
-				break;
-			case '0':
-				HIDKey[2] = 0x27;
-				break;
-			case '.':
-				HIDKey[2] = 0x37;
-				break;
-			case '~':
-				HIDKey[0] = L_ALT;
-				HIDKey[2] = 0x05;
-				break;
-			case '!':
-				HIDKey[0] = L_ALT;
-				HIDKey[2] = 0x08;
-				break;
-			default:
-				break;
-		}
+		const uint8_t anTable1['0' - ' ' + 1][2] =
+		{
+			{KEY_NONE, KEY_SPACE}, // space.
+			{KEY_MOD_LSHIFT, KEY_1}, // !
+			{KEY_MOD_LSHIFT, KEY_APOSTROPHE}, // "
+			{KEY_MOD_LSHIFT, KEY_3}, // #
+			{KEY_MOD_LSHIFT, KEY_4}, // $
+			{KEY_MOD_LSHIFT, KEY_5}, // %
+			{KEY_MOD_LSHIFT, KEY_7}, // &
+			{KEY_NONE, KEY_APOSTROPHE}, // '
+			{KEY_MOD_LSHIFT, KEY_9}, // (
+			{KEY_MOD_LSHIFT, KEY_0}, // )
+			{KEY_MOD_LSHIFT, KEY_8}, // *
+			{KEY_NONE, KEY_KPPLUS}, // +
+			{KEY_NONE, KEY_COMMA}, // ,
+			{KEY_NONE, KEY_MINUS}, // -
+			{KEY_NONE, KEY_DOT}, // .
+			{KEY_NONE, KEY_SLASH}, // /
+			{KEY_NONE, KEY_0}, // 0
+		};
+		uint8_t nIdx = c - ' ';
+		HIDKey[0] = anTable1[nIdx][0];
+		HIDKey[2] = anTable1[nIdx][1];
 	}
-	mDelaymS( 10 );
-	usb_SendKbd(HIDKey, sizeof(HIDKey));
+	else if(':' <= c && c <= '@')
+	{
+		const uint8_t anTable['@' - ':' + 1][2] = 
+		{
+			{KEY_MOD_LSHIFT, KEY_SEMICOLON}, // :
+			{KEY_NONE, KEY_SEMICOLON}, // ;
+			{KEY_MOD_LSHIFT, KEY_COMMA},// <
+			{KEY_NONE, KEY_EQUAL},// =
+			{KEY_MOD_LSHIFT, KEY_DOT},// >
+			{KEY_MOD_LSHIFT, KEY_SLASH},// ?
+			{KEY_MOD_LSHIFT, KEY_2},// @
+		};
+		uint8_t nIdx = c - ':';
+		HIDKey[0] = anTable[nIdx][0];
+		HIDKey[2] = anTable[nIdx][1];
+	}
+	else if('[' <= c && c <= '`')
+	{
+		const uint8_t anTable2['`' - '[' + 1][2] =
+		{
+			{KEY_NONE, KEY_LEFTBRACE}, // [
+			{KEY_NONE, KEY_BACKSLASH}, // '\'
+			{KEY_NONE, KEY_RIGHTBRACE}, // ]
+			{KEY_MOD_LSHIFT, KEY_6}, // ^
+			{KEY_MOD_LSHIFT, KEY_MINUS}, // _
+			{KEY_NONE, KEY_GRAVE},// `
+		};
+		uint8_t nIdx = c - '[';
+		HIDKey[0] = anTable2[nIdx][0];
+		HIDKey[2] = anTable2[nIdx][1];
+	}
+	else if('{' <= c && c <= '~')
+	{
+		const uint8_t anTable3['~' - '{' + 1][2] =
+		{
+			{KEY_MOD_LSHIFT, KEY_LEFTBRACE}, // {
+			{KEY_MOD_LSHIFT, KEY_BACKSLASH}, // |
+			{KEY_MOD_LSHIFT, KEY_RIGHTBRACE}, // }
+			{KEY_MOD_LSHIFT, KEY_GRAVE}, // ~
+		};
+		uint8_t nIdx = c - '{';
+		HIDKey[0] = anTable3[nIdx][0];
+		HIDKey[2] = anTable3[nIdx][1];
+	}
+	else if(('\r' == c) || ('\n' == c))
+	{
+		HIDKey[2] = KEY_ENTER;
+	}
 
-	mDelaymS( 10 );
-	HIDKey[0] = 0x00;
-	HIDKey[2] = 0x00;
 	usb_SendKbd(HIDKey, sizeof(HIDKey));
+	mDelaymS(10);
+
+	HIDKey[0] = 0;
+	HIDKey[2] = 0;
+	usb_SendKbd(HIDKey, sizeof(HIDKey));
+	mDelaymS(10);
 }
 
 void SendString(char* pStr)
@@ -149,17 +151,24 @@ void kbd_run()
         }
 		if(nKeyIn != KEY)
 		{
+#if 0
+			for(char a = ' '; a < 0x7F; a++)
+			{
+				SendChar(a);
+			}
+#else
 			memset(aBuff, 0x0, sizeof(aBuff));
 			if(KEY != 0) // Released.
 			{
-				aBuff[2] = 0;
+//				aBuff[2] = 0;
 				usb_SendKbd(aBuff, 8);
 			}
 			else // Pushed.
 			{
-				aBuff[2] = SPACE;
+				aBuff[2] = KEY_SPACE;
 				usb_SendKbd(aBuff, 8);
 			}
+#endif
 			nKeyIn = KEY;
 		}
 #if EN_TOUCH
