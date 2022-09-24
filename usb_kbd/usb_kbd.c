@@ -451,79 +451,6 @@ void ISR_Timer0() __interrupt (INT_NO_TMR0)
 	gnMillis++;
 }
 
-
-#if EN_TOUCH
-
-__xdata uint8_t 	TK_Code[TOUCH_NUM] = {0x03, 0x04,};
-
-__xdata uint16_t 		Key_FreeBuf[TOUCH_NUM];
-__xdata uint8_t			Touch_IN;
-
-
-uint8_t TK_SelectChannel(uint8_t ch)
-{
-	if (ch <= TOUCH_NUM)
-	{
-		TKEY_CTRL = (TKEY_CTRL & 0xF8) | TK_Code[ch];
-		return 1;
-	}
-
-	return	0;
-}
-
-void ISR_Touch() __interrupt (INT_NO_TKEY)
-{
-    __xdata	static uint8_t nCh = 0;
-    __xdata	uint16_t KeyData;
-	KeyData = TKEY_DAT;
-
-	if(KeyData < (Key_FreeBuf[nCh] - TH_VALUE))
-	{
-		Touch_IN |=  1 << (TK_Code[nCh] - 1);
-	}
-	if(++nCh >= TOUCH_NUM)
-	{
-		nCh = 0;
-	}
-	TK_SelectChannel(nCh);
-}
-
-
-
-uint8_t TK_Init(uint8_t channel)
-{
-    __xdata	uint8_t 	i,j;
-    __xdata	uint16_t 	sum;
-    __xdata	uint16_t 	OverTime;
-
-	P1_DIR_PU &= ~channel;
-	P1_MOD_OC &= ~channel;
-	TKEY_CTRL |= bTKC_2MS ;
-
-	for (i = 0; i < TOUCH_NUM; i++)
-	{
-		sum = 0;
-		j = SAMPLE_TIMES;
-		TK_SelectChannel(i);
-		while(j--)
-		{
-			OverTime = 0;
-			while((TKEY_CTRL & bTKC_IF) == 0) // Timing interrupt flag.
-			{
-				if(++OverTime == 0)
-				{
-					return 0;
-				}
-			}
-			sum += TKEY_DAT;
-		}
-		Key_FreeBuf[i] = sum / SAMPLE_TIMES;
-	}
-	IE_TKEY = 1;
-	return 1;
-}
-#endif
-
 void main()
 {
     CfgFsys();
@@ -531,10 +458,6 @@ void main()
     mInitSTDIO();
     USBDeviceInit();
 
-#if EN_TOUCH
-	TK_Init(0x30);
-	TK_SelectChannel(0);
-#endif
     kbd_init();
 
 	TMOD = 0x11;
