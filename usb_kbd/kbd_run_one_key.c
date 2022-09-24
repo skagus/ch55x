@@ -2,10 +2,10 @@
  * Handle Keyboard event.
  **/
 
-#include "ch554.h"
-#include "debug.h"
 #include <stdio.h>
 #include <string.h>
+#include <ch554.h>
+#include <debug.h>
 #include <ch554_usb.h>
 #include "kbd.h"
 #include "hid_key.h"
@@ -19,7 +19,6 @@ SBIT(LED2, 0xB0, LED_PIN2);
 SBIT(KEY, 0xB0, KEY_PIN);
 
 extern uint32_t gnMillis;
-extern __xdata uint8_t			Touch_IN;
 
 static void SendChar (char c)
 {
@@ -151,12 +150,6 @@ void kbd_run()
         }
 		if(nKeyIn != KEY)
 		{
-#if 0
-			for(char a = ' '; a < 0x7F; a++)
-			{
-				SendChar(a);
-			}
-#else
 			memset(aBuff, 0x0, sizeof(aBuff));
 			if(KEY != 0) // Released.
 			{
@@ -168,21 +161,10 @@ void kbd_run()
 				aBuff[2] = KEY_SPACE;
 				usb_SendKbd(aBuff, 8);
 			}
-#endif
 			nKeyIn = KEY;
 		}
-#if EN_TOUCH
-        if (Touch_IN != 0)
-        {
-            LED1 = !LED1;
-            sprintf(aBuff, "IN:%X\n", Touch_IN);
-            SendString(aBuff);
-            Touch_IN = 0;
-        }
-#endif
     }
 }
-
 
 
 void kbd_init()
