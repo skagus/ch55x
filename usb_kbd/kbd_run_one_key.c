@@ -157,7 +157,7 @@ void kbd_run()
 			}
 			else // Pushed.
 			{
-				aBuff[2] = ENTER;
+				aBuff[2] = SPACE;
 				usb_SendKbd(aBuff, 8);
 			}
 			nKeyIn = KEY;
